@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "memvara": {
+      "type": "http",
+      "url": "https://app.memvara.dev/mcp",
+      "oauth_resource": "https://app.memvara.dev/mcp"
+    }
+  }
+}

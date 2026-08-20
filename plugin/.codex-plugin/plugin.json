@@ -1,0 +1,31 @@
+{
+  "name": "memvara",
+  "version": "0.1.0",
+  "description": "Bitemporal memory for agents: hosted MCP plus the skill that says how to use it.",
+  "author": {
+    "name": "Memvara",
+    "url": "https://memvara.dev"
+  },
+  "homepage": "https://memvara.dev/docs/agents",
+  "repository": "https://github.com/memvara/codex-memvara",
+  "license": "Apache-2.0",
+  "keywords": ["memory", "mcp", "agents", "codex", "chatgpt"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Memvara",
+    "shortDescription": "Hosted memory for Codex and ChatGPT",
+    "longDescription": "Ten memory tools on a hosted store, plus the skill for using them without forging history. OAuth in the browser. No local process.",
+    "developerName": "Memvara",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://memvara.dev",
+    "privacyPolicyURL": "https://memvara.dev/privacy",
+    "termsOfServiceURL": "https://memvara.dev/terms",
+    "defaultPrompt": [
+      "What do you remember about this project?",
+      "Remember that we use Postgres in production.",
+      "Why did you say I lived in Berlin?"
+    ]
+  }
+}
