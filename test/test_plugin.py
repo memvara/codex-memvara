@@ -204,15 +204,19 @@ class License(unittest.TestCase):
 
 
 #: How many tools `app.memvara.dev/mcp` advertises, which is what the README's sentence is
-#: about. It is NOT the core's tool count and the two are routinely different: the core is
-#: on thirteen since `memory_standing`, and the hosted endpoint served twelve on
-#: 2026-08-25 because production runs an older core. Documenting the core's number here
-#: would be a true statement about the wrong thing -- a reader follows this sentence to a
-#: server, not to a repository.
+#: about. It is NOT the core's tool count. The two are routinely different and were
+#: different for most of 2026-08-25: the core went to thirteen with `memory_standing` while
+#: production still ran an older core and served twelve, so this said twelve, the core
+#: repository said thirteen, and both were true of their own subject.
 #:
-#: When they differ, the hosted number is the one that belongs in the README, and this
-#: constant is the single place to change when a deploy moves it.
-HOSTED_TOOL_COUNT = 12
+#: 0.5.0 shipped and the box was redeployed that evening, so they agree again at thirteen.
+#: Verified against the endpoint rather than inferred from the release: `tools/list`
+#: answers thirteen with `memory_standing` among them.
+#:
+#: Keep reading it as the HOSTED number even while it matches. A reader follows this
+#: sentence to a server, not to a repository, and the next release separates them again for
+#: however long the deploy lags. This constant is the single place to change when it does.
+HOSTED_TOOL_COUNT = 13
 
 #: Spelled out because that is how the sentence is written. Indexed by the count so the
 #: word cannot drift from the number -- two representations of one value disagreeing is
