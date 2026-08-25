@@ -14,7 +14,7 @@ not use an API key.
 
 ## What you get
 
-Ten tools on `https://app.memvara.dev/mcp`, plus the `memvara` skill.
+Twelve tools on `https://app.memvara.dev/mcp`, plus the `memvara` skill.
 
 ## ChatGPT
 

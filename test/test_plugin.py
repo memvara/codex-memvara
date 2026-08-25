@@ -203,6 +203,75 @@ class License(unittest.TestCase):
         self.assertIn("Version 2.0", text)
 
 
+#: How many tools `app.memvara.dev/mcp` advertises, which is what the README's sentence is
+#: about. It is NOT the core's tool count and the two are routinely different: the core is
+#: on thirteen since `memory_standing`, and the hosted endpoint served twelve on
+#: 2026-08-25 because production runs an older core. Documenting the core's number here
+#: would be a true statement about the wrong thing -- a reader follows this sentence to a
+#: server, not to a repository.
+#:
+#: When they differ, the hosted number is the one that belongs in the README, and this
+#: constant is the single place to change when a deploy moves it.
+HOSTED_TOOL_COUNT = 12
+
+#: Spelled out because that is how the sentence is written. Indexed by the count so the
+#: word cannot drift from the number -- two representations of one value disagreeing is
+#: the failure this guard exists to prevent.
+NUMBER_WORDS = (
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+)
+
+
+class ToolCount(unittest.TestCase):
+    """The README states how many tools the hosted endpoint has. Nothing checked it.
+
+    It said "Ten tools" while the endpoint served twelve -- wrong before `memory_standing`
+    existed, because `memory_neighborhood` and `memory_paths` had never been counted. No
+    test touched the number, so it was free to rot from the day it was written.
+    """
+
+    def test_the_readme_states_the_hosted_tool_count(self) -> None:
+        """Stated positively: the CORRECT phrase must be present.
+
+        The tempting spelling is "the README does not say 'ten tools'". That passes on a
+        README that has stopped saying anything at all -- a rewritten sentence, a deleted
+        paragraph, a digit instead of a word -- and a guard a deletion satisfies is a guard
+        that has quietly stopped guarding. Requiring the right phrase means a page that no
+        longer tells the reader the truth fails exactly as loudly as one that tells them
+        something false.
+        """
+        word = NUMBER_WORDS[HOSTED_TOOL_COUNT]
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn(f"{word.capitalize()} tools", text,
+                      f"the README must state the hosted tool count as "
+                      f"'{word.capitalize()} tools'")
+
+    def test_no_other_count_is_stated_anywhere(self) -> None:
+        """One number, one place. A second sentence with a different word is how this rots.
+
+        Checked across every markdown file rather than the README alone, because the next
+        person to state the count will not necessarily state it where the last one did.
+
+        `plugin/skills/` is excluded because it is not ours to edit -- it is a byte copy of
+        the library's tree and `test_matches_library_at_lock_sha` requires it to stay one.
+        The exclusion is not a shrug: the vendored skill DOES state a stale count right now
+        ("## The ten tools", missing memory_neighborhood and memory_paths), and the fix for
+        that belongs upstream in memvara/memvara, arriving here through a sync. A guard
+        that failed on it would be asking this repository to correct another one, and the
+        only way to make it pass would be the edit the drift test forbids.
+        """
+        word = NUMBER_WORDS[HOSTED_TOOL_COUNT]
+        pattern = re.compile(
+            r"\b(" + "|".join(w for w in NUMBER_WORDS if w != word) + r")\s+tools\b",
+            re.IGNORECASE)
+        for path in ROOT.rglob("*.md"):
+            if {"node_modules", "_library", "skills"} & set(path.parts):
+                continue
+            found = pattern.findall(path.read_text(encoding="utf-8"))
+            self.assertEqual(found, [], f"{path} states a different tool count: {found}")
+
+
 class Hygiene(unittest.TestCase):
     def test_no_npx_in_json(self) -> None:
         """No JSON *this repo ships* may reach for npx.
