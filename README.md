@@ -8,9 +8,21 @@ codex plugin marketplace add memvara/codex-memvara
 ```
 
 Then install `memvara` from that marketplace. The first connection opens
-a browser so you can click Allow. That grant lasts 90 days. Nothing is
-installed on the machine: there is no local Python process and we do
-not use an API key.
+a browser so you can click Allow. That grant lasts 90 days. Nothing runs
+in the background and no API key ships in the plugin files.
+
+## When the browser sign-in will not finish
+
+The skill ships `skills/memvara/scripts/memvara_auth.py`: the device-code
+flow, standard library only, no `pip install`, and nothing left running
+when it returns. Ask Codex to authenticate memvara and it runs the script,
+which prints a short code and a URL for you to approve and then writes
+`~/.memvara/credentials.json`. It also does `logout` and `stats`.
+
+A Codex plugin cannot ship slash commands — `commands` is not a field its
+manifest accepts, and `validate_plugin.py` rejects it the same way it
+rejects a field that does not exist — so there is no `/memvara
+authenticate` here. Asking in words is the interface on this host.
 
 ## What you get
 

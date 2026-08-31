@@ -547,3 +547,97 @@ class Version(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AuthScript(unittest.TestCase):
+    """The skill ships the device-code flow, because this host has nowhere else to put it.
+
+    Codex plugins cannot ship slash commands: `commands` is not a field the manifest
+    accepts, and the `validate_plugin.py` shipped with the binary rejects it with the same
+    message it gives a field invented on the spot. What Codex does load is the skill, and
+    the skill was measured to resolve a path relative to its own directory before anything
+    was built on that -- a probe skill whose SKILL.md held no nonce and pointed at a
+    sibling file came back with the nonce, and came back `NO PROBE` with the registration
+    removed and every file still on disk.
+
+    So the script arrives here the way every other skill byte does: vendored whole from
+    memvara/memvara by skill-sync.yml, diffed against `skill.lock`. These tests do not
+    re-check the bytes -- `SkillTree` already does, against the library rather than
+    against a copy of this repository's own claim. They check the two things that vendoring
+    cannot: that the file is actually here, and that a person is told it exists.
+    """
+
+    SCRIPT = SKILL / "scripts" / "memvara_auth.py"
+    COMMANDS = ("authenticate", "login", "logout", "stats")
+
+    def test_the_skill_ships_the_auth_script(self) -> None:
+        """Stated positively, because the failure to catch is a deletion.
+
+        Spelled "no unexpected file in the skill tree" this would pass on a plugin that
+        had stopped shipping the one file a locked-out user needs.
+        """
+        self.assertTrue(
+            self.SCRIPT.is_file(),
+            f"{self.SCRIPT.relative_to(ROOT)} is missing; the README tells the user it "
+            "is there and the skill tells the model to run it")
+
+    def test_the_script_runs_here_and_names_every_command(self) -> None:
+        """Executed rather than read. A vendored file with a syntax error is invisible to
+        a byte diff against the library -- both copies are equally broken and agree.
+
+        No network: an unknown command is refused on shape before anything is dialled.
+        """
+        done = subprocess.run(
+            ["python3", str(self.SCRIPT), "not-a-command"],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 2, done.stdout + done.stderr)
+        for command in self.COMMANDS:
+            self.assertIn(command, done.stdout,
+                          f"the usage this prints omits {command}")
+
+    def test_the_readme_says_the_script_is_here_and_where(self) -> None:
+        """A capability nobody is told about is one nobody uses.
+
+        The path is asserted and then RESOLVED, so a README that names a plausible-looking
+        path into the wrong directory fails here rather than sending someone to a file
+        that is not there.
+        """
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        quoted = "skills/memvara/scripts/memvara_auth.py"
+        self.assertIn(quoted, text,
+                      "the README never mentions the auth script, so the only way to "
+                      "find it is to read the skill")
+        self.assertTrue((PLUGIN / quoted).is_file(),
+                        f"the README says {quoted}, and nothing is there")
+        self.assertIn("no `pip install`", text,
+                      "the README does not say the script needs nothing installed, "
+                      "which is the reason it can rescue a locked-out machine")
+
+    def test_the_readme_says_this_host_has_no_slash_commands(self) -> None:
+        """The reduced port, stated in the shipped artifact rather than in a plan.
+
+        `claude-memvara` and `grok-memvara` ship `/memvara authenticate`. This host cannot,
+        and a user who has read about those commands and cannot find them here needs to
+        learn why from the README rather than conclude the plugin is broken. Asserted
+        positively -- the sentence must be PRESENT -- so deleting the explanation fails
+        exactly as loudly as never writing it.
+        """
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("cannot ship slash commands", text)
+        self.assertIn("/memvara", text,
+                      "the section does not name the thing the user went looking for")
+
+    def test_the_readme_no_longer_promises_no_python(self) -> None:
+        """It said "there is no local Python process", and now one ships.
+
+        Stated as a requirement on the CURRENT sentence rather than as an absence of the
+        old one: the README has to say what is true now, so a rewrite that deletes the
+        claim entirely and explains nothing fails here too.
+        """
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertNotIn("no local Python process", text,
+                         "the README still claims no Python ships, and a Python script "
+                         "is sitting in plugin/skills/memvara/scripts/")
+        self.assertIn("Nothing runs\nin the background", text,
+                      "the README should still tell the reader nothing is left running, "
+                      "which is the true half of what that sentence used to claim")
