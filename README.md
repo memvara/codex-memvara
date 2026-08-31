@@ -26,7 +26,7 @@ authenticate` here. Asking in words is the interface on this host.
 
 ## What you get
 
-Thirteen tools on `https://app.memvara.dev/mcp`, plus the `memvara` skill.
+Fourteen tools on `https://app.memvara.dev/mcp`, plus the `memvara` skill.
 
 ## ChatGPT
 

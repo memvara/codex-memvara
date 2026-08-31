@@ -15,7 +15,7 @@
   "interface": {
     "displayName": "Memvara",
     "shortDescription": "Hosted memory for Codex and ChatGPT",
-    "longDescription": "Ten memory tools on a hosted store, plus the skill for using them without forging history. OAuth in the browser. No local process.",
+    "longDescription": "Fourteen memory tools on a hosted store, plus the skill for using them without forging history. OAuth in the browser. No local process.",
     "developerName": "Memvara",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],

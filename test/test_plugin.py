@@ -217,7 +217,17 @@ class License(unittest.TestCase):
 #: Keep reading it as the HOSTED number even while it matches. A reader follows this
 #: sentence to a server, not to a repository, and the next release separates them again for
 #: however long the deploy lags. This constant is the single place to change when it does.
-HOSTED_TOOL_COUNT = 13
+#: Checked against the live endpoint by `ToolCount.test_the_declared_tools_are_the_ones_
+#: the_endpoint_serves`. This number is a convenience for the offline guards, NOT the
+#: referent: it said 13 while the endpoint served 14, and every guard in this file was
+#: green throughout, because they compared the README against this and this against
+#: nothing.
+HOSTED_TOOLS = (
+    "memory_recall", "memory_search", "memory_neighborhood", "memory_paths",
+    "memory_ask", "memory_since", "memory_standing", "memory_add", "memory_remember",
+    "memory_forget", "memory_end", "memory_history", "memory_why", "memory_stats",
+)
+HOSTED_TOOL_COUNT = len(HOSTED_TOOLS)
 
 #: Spelled out because that is how the sentence is written. Indexed by the count so the
 #: word cannot drift from the number -- two representations of one value disagreeing is
@@ -228,6 +238,141 @@ NUMBER_WORDS = (
 )
 
 
+def _tracked(pattern: str) -> "list[pathlib.Path]":
+    """Every file this repository TRACKS matching `pattern`, asked of git.
+
+    The filesystem is the wrong referent for "files this repository owns", and the gap is
+    not academic. Worktrees live at `.claude/worktrees/<name>/`, INSIDE the checkout, so
+    `ROOT.rglob` from the main checkout walks into every other worktree and reads their
+    files -- at whatever commits those happen to sit at -- as though they were this
+    repository's. `test_no_other_count_is_stated_anywhere` failed on `main` for precisely
+    that: a sibling worktree pinned at an older commit still said "Ten tools", and the
+    guard reported this repository as stating a count it does not state anywhere.
+
+    It survived because it is invisible from where the work happens. Run the suite from a
+    worktree and there are no worktrees below it, so the scan is correct and green; run it
+    from the main checkout and it is wrong. CI never sees it either, having no worktrees.
+
+    **Do not fix this with `.claude` in a `set(path.parts)` denylist.** From inside a
+    worktree the checkout itself sits under `.claude/worktrees/`, so every absolute path
+    contains `.claude`, the filter excludes the entire repository, and the guard passes
+    having read nothing. A guard that scanned zero files is indistinguishable from one
+    that found nothing wrong. Filtering `path.relative_to(ROOT).parts` would be correct;
+    asking git is better, because a denylist has to keep guessing the name of the next
+    scratch directory somebody drops in the tree, and `_library` -- which CI checks out
+    inside the repo -- is the one it already had to learn.
+    """
+    listed = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "-z", pattern],
+        check=True, capture_output=True, text=True).stdout
+    # `ls-files` reports the INDEX, so a file deleted with `rm` rather than `git rm` is
+    # still listed and every caller here reads it immediately. `rglob` could only ever
+    # yield files that exist, so dropping the check would turn an unstaged deletion into
+    # a FileNotFoundError naming a path the developer has already deleted -- which reads
+    # as a stale cache rather than as the unstaged deletion it is.
+    return [path for path in (ROOT / name for name in listed.split("\0") if name)
+            if path.is_file()]
+
+
+class EndpointUnreachable(Exception):
+    """The hosted endpoint could not be asked. Never a pass -- the guard skips and says so."""
+
+
+def _endpoint_tools() -> "list[str]":
+    """`tools/list` from the LIVE hosted endpoint, in the order it returns them.
+
+    The referent for "what does the hosted MCP serve" is the hosted MCP. Everything else
+    in this file -- `HOSTED_TOOLS`, the README, the count word -- is a claim ABOUT it, and
+    a guard that compares one claim against another proves only that this repository is
+    self-consistent. `memvara-web` shipped exactly that: `test/tool-count.test.ts` pinned
+    the site's own number and stayed green while the site said ten and the endpoint served
+    twelve.
+
+    Standard library plus `certifi` when importable, matching the plugin's own rules:
+    python.org's macOS build loads zero roots from the system trust store, and Cloudflare
+    answers the stdlib User-Agent with a 1010 at the edge, so both are set explicitly.
+    """
+    import http.client
+    import ssl
+    import uuid
+
+    key = (os.environ.get("MEMVARA_API_KEY") or "").strip()
+    if not key:
+        path = os.path.expanduser("~/.memvara/credentials.json")
+        try:
+            with open(path, encoding="utf-8") as handle:
+                stored = json.load(handle)
+        except (OSError, ValueError):
+            stored = {}
+        for field in ("api_key", "key", "token"):
+            if isinstance(stored.get(field), str) and stored[field].strip():
+                key = stored[field].strip()
+                break
+    if not key:
+        raise EndpointUnreachable(
+            "no credential: set MEMVARA_API_KEY or run the plugin's authenticate command")
+
+    try:
+        import certifi
+
+        context = ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # noqa: BLE001 -- certifi is optional, the default context is the fallback
+        context = ssl.create_default_context()
+
+    host = "app.memvara.dev"
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "User-Agent": "memvara-plugin-tests/1.0",
+    }
+
+    def call(body: dict, extra: "dict | None" = None) -> "tuple[int, dict, bytes]":
+        conn = http.client.HTTPSConnection(host, timeout=20, context=context)
+        try:
+            conn.request("POST", "/mcp", json.dumps(body),
+                         {**headers, **(extra or {})})
+            reply = conn.getresponse()
+            return reply.status, dict(reply.getheaders()), reply.read()
+        finally:
+            conn.close()
+
+    try:
+        status, got, raw = call({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                       "clientInfo": {"name": "memvara-plugin-tests", "version": "1"}},
+        })
+    except OSError as exc:
+        raise EndpointUnreachable(f"{type(exc).__name__}: {exc}") from exc
+    if status != 200:
+        raise EndpointUnreachable(f"initialize answered HTTP {status}: {raw[:120]!r}")
+    session = next((value for name, value in got.items()
+                    if name.lower() == "mcp-session-id"), None)
+    if not session:
+        raise EndpointUnreachable("initialize returned no mcp-session-id header")
+
+    call({"jsonrpc": "2.0", "method": "notifications/initialized"},
+         {"mcp-session-id": session})
+    status, _got, raw = call({"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                             {"mcp-session-id": session})
+    if status != 200:
+        raise EndpointUnreachable(f"tools/list answered HTTP {status}: {raw[:120]!r}")
+
+    text = raw.decode("utf-8", "replace")
+    match = re.search(r"\{.*\}", text, re.S)
+    if not match:
+        raise EndpointUnreachable(f"tools/list returned no JSON object: {text[:120]!r}")
+    try:
+        body = json.loads(match.group(0))
+        served = [tool["name"] for tool in body["result"]["tools"]]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise EndpointUnreachable(f"tools/list was not the expected shape: {exc}") from exc
+    if not served:
+        raise EndpointUnreachable("tools/list returned an empty tool set")
+    return served
+
+
 class ToolCount(unittest.TestCase):
     """The README states how many tools the hosted endpoint has. Nothing checked it.
 
@@ -235,6 +380,33 @@ class ToolCount(unittest.TestCase):
     existed, because `memory_neighborhood` and `memory_paths` had never been counted. No
     test touched the number, so it was free to rot from the day it was written.
     """
+
+    def test_the_declared_tools_are_the_ones_the_endpoint_serves(self) -> None:
+        """The only guard here that asks the SERVER. Everything else asks this file.
+
+        `HOSTED_TOOLS` held thirteen names while `https://app.memvara.dev/mcp` served
+        fourteen, and the whole class was green the entire time -- the README matched the
+        tuple, the tuple matched the count word, and nothing matched the endpoint. That is
+        the `memvara-web` failure repeated: a claim checked against a copy of itself.
+
+        Names AND order, because the README asserts order and a reader reconciles it
+        against the server's listing.
+
+        SKIPS rather than passes when the endpoint cannot be asked -- no credential, no
+        network. `tools/list` needs `Authorization`, so CI without a key cannot run this
+        and must say so out loud. A check that silently succeeds when it could not look is
+        the failure it exists to prevent, one level up.
+        """
+        try:
+            served = _endpoint_tools()
+        except EndpointUnreachable as exc:
+            raise unittest.SkipTest(
+                f"hosted endpoint not asked, tool set NOT checked: {exc}") from exc
+
+        self.assertEqual(
+            served, list(HOSTED_TOOLS),
+            "HOSTED_TOOLS and the endpoint disagree. The endpoint is right: update the "
+            "tuple, the README sentence and its list together")
 
     def test_the_readme_states_the_hosted_tool_count(self) -> None:
         """Stated positively: the CORRECT phrase must be present.
@@ -267,11 +439,28 @@ class ToolCount(unittest.TestCase):
         only way to make it pass would be the edit the drift test forbids.
         """
         word = NUMBER_WORDS[HOSTED_TOOL_COUNT]
+        # `(?:memory\s+)?` because the store listing does not say "ten tools", it says
+        # "ten MEMORY tools" -- and a pattern without it does not match, which is the
+        # second half of why that sentence rotted unnoticed. Widening the file set alone
+        # left this sabotage passing: the file was scanned and the regex still missed it.
         pattern = re.compile(
-            r"\b(" + "|".join(w for w in NUMBER_WORDS if w != word) + r")\s+tools\b",
+            r"\b(" + "|".join(w for w in NUMBER_WORDS if w != word)
+            + r")\s+(?:memory\s+)?tools\b",
             re.IGNORECASE)
-        for path in ROOT.rglob("*.md"):
-            if {"node_modules", "_library", "skills"} & set(path.parts):
+        # `*.json` as well as `*.md`, and asked of git rather than the filesystem.
+        #
+        # Markdown alone is how this repository's own store listing rotted: the
+        # `interface.longDescription` in `plugin/.codex-plugin/plugin.json` -- the sentence
+        # a user reads BEFORE installing -- said "Ten memory tools" and no guard covered
+        # the file, so it was free to say any number. A hand-maintained list of what is
+        # covered is itself unguarded.
+        #
+        # `git ls-files` rather than `ROOT.rglob` because worktrees live at
+        # `.claude/worktrees/<name>/`, INSIDE the checkout: rglob from the main checkout
+        # walks into every other worktree and reads their files, at whatever commits those
+        # sit at, as though they were this repository's.
+        for path in _tracked("*.md") + _tracked("*.json"):
+            if "skills" in path.relative_to(ROOT).parts:
                 continue
             found = pattern.findall(path.read_text(encoding="utf-8"))
             self.assertEqual(found, [], f"{path} states a different tool count: {found}")
