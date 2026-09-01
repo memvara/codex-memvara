@@ -8,8 +8,44 @@ codex plugin marketplace add memvara/codex-memvara
 ```
 
 Then install `memvara` from that marketplace. The first connection opens
-a browser so you can click Allow. That grant lasts 90 days. Nothing runs
-in the background and no API key ships in the plugin files.
+a browser so you can click Allow. That grant lasts 90 days, and no API key
+ships in the plugin files.
+
+## What runs on your machine, and the one thing you must do
+
+Until 0.2.5 this page said nothing ran in the background. That was true of
+every version before this one and is not true now, so the sentence is gone
+rather than softened.
+
+The plugin ships hooks. On every prompt Codex runs `python3
+hooks/run.py recall`, at session start `session_start`, and when a turn ends
+`capture`, which spends 12-14 seconds mining the turn that just finished.
+Capture is declared *synchronous* and forks itself into its own process
+group, so the turn is never held open — an async hook does not run at all on
+this client, measured on codex-cli 0.151.0.
+
+**Codex will not run any of it until you trust the hooks.** This is the part
+worth reading twice: an untrusted hook is not refused, it is silently
+skipped. Three test runs produced no output at all while Codex was visibly
+parsing the file and warning about timeouts in it. Nothing said "blocked".
+If memory never appears, that is the first thing to check — Codex records
+the decision under `hooks.state` in `~/.codex/config.toml`.
+
+Nothing this plugin prints reaches your screen: a hook's `systemMessage`
+reaches neither the model nor the terminal here, measured. Its account of
+itself is `~/.memvara/.hooks/` — `hooks.log` for the read path and
+`capture.log` for the write path, where every run writes a line including
+the runs that decide to do nothing.
+
+Capture mines the turn with **your own model** — it runs `codex exec` with
+whatever you have configured and authenticated, so nothing else needs
+installing and nothing overrides the model you chose. `claude -p` stays as a
+fallback if you happen to have Claude Code; with neither, extraction logs that
+it could not run and raises an alert on the next prompt rather than storing
+nothing in silence.
+
+That makes capture's speed and quality yours too, and `capture.log` is where
+that shows.
 
 ## When the browser sign-in will not finish
 

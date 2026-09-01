@@ -1,0 +1,53 @@
+{
+  "description": "Memvara for Codex: recall on every prompt, capture when a turn ends. Every command goes through run.py, which binds hosts/codex.py before dispatching. Capture is declared SYNCHRONOUS on purpose -- an async hook does not run at all on this client -- and run.py forks it into its own session, so the turn is never held open. Hooks stay inert until trusted; nothing this plugin prints reaches the screen, so its account is ~/.memvara/.hooks/.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/hooks/run.py\" session_start --host codex",
+            "timeout": 20,
+            "additionalContextLimit": 32000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/hooks/run.py\" recall --host codex",
+            "timeout": 10,
+            "additionalContextLimit": 32000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/hooks/run.py\" capture --host codex",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*memvara.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/hooks/run.py\" approve --host codex",
+            "timeout": 5,
+            "additionalContextLimit": 32000
+          }
+        ]
+      }
+    ]
+  }
+}
