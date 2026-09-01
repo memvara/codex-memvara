@@ -122,15 +122,59 @@ def _library_skill_files(sha: str) -> "set[str]":
             if entry.get("type") == "blob" and entry["path"].startswith(prefix)}
 
 
-def _lock() -> dict[str, str]:
+def _lock(name: str = "skill.lock") -> dict[str, str]:
     out: dict[str, str] = {}
-    for line in (ROOT / "skill.lock").read_text(encoding="utf-8").splitlines():
+    for line in (ROOT / name).read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         key, _, value = line.partition("=")
         out[key.strip()] = value.strip()
     return out
+
+
+def _library_files(sha: str, path: str) -> "set[str]":
+    """Every path under `path` at `sha`, relative to `path`. The hook twin of
+    `_library_skill_files`, which hardcodes the packaged-skill prefix."""
+    root = os.environ.get("MEMVARA_LIBRARY")
+    prefix = f"{path}/"
+    if root:
+        try:
+            out = subprocess.check_output(
+                ["git", "-C", root, "ls-tree", "-r", "--name-only", sha, path],
+                stderr=subprocess.DEVNULL).decode()
+        except subprocess.CalledProcessError:
+            out = None
+        if out is not None:
+            return {line[len(prefix):] for line in out.splitlines()
+                    if line.startswith(prefix)}
+    try:
+        tree = json.loads(_fetch(
+            f"https://api.github.com/repos/memvara/memvara/git/trees/{sha}?recursive=1"))
+    except Exception as exc:
+        raise LibraryUnreachable(str(exc)) from exc
+    return {entry["path"][len(prefix):] for entry in tree.get("tree", [])
+            if entry.get("type") == "blob" and entry["path"].startswith(prefix)}
+
+
+#: The vendored hook tree, the library path it comes from, and the one file in it that is
+#: NOT vendored: `hooks.json` is generated from `hosts/codex.py` and has its own guard.
+HOOKS = PLUGIN / "hooks"
+LIBRARY_HOOKS_PATH = "plugin/hooks"
+GENERATED_REGISTRATION = "hooks.json"
+
+#: Hook scripts are executable content Codex runs on every prompt, so the allowlist names
+#: them one by one. A file under `hooks/` that nobody listed is the thing to catch.
+ALLOWED_HOOK_FILES = {
+    "hooks.json",
+    "run.py", "recall.py", "capture.py", "session_start.py", "approve.py", "daemon.py",
+    "core/__init__.py", "core/host.py", "core/envelope.py",
+    "hosts/__init__.py", "hosts/claude.py", "hosts/codex.py", "hosts/opencode.py",
+    "js/shim.mjs", "js/opencode.mjs",
+    "lib/__init__.py", "lib/extract.py", "lib/fast.py", "lib/hosted.py", "lib/ipc.py",
+    "lib/open.py", "lib/standing.py", "lib/transcript.py", "lib/usage.py", "lib/write.py",
+    "tools/__init__.py", "tools/generate.py",
+}
 
 
 class SkillTree(unittest.TestCase):
@@ -567,8 +611,16 @@ class Hygiene(unittest.TestCase):
                 continue
             self.assertNotIn("npx", path.read_text(encoding="utf-8"), path)
 
-    def test_no_hooks(self) -> None:
-        self.assertFalse((PLUGIN / "hooks").exists())
+    def test_no_app_manifest_and_no_commands(self) -> None:
+        """`hooks/` used to be asserted absent here and is not any more: this plugin ships
+        it. What replaced that assertion is the `Hooks` class below, which is strictly
+        stronger than "the directory is absent" -- every file named one by one and every
+        byte compared against the library. An emptied `hooks/` fails those and would have
+        satisfied the assertion removed here.
+
+        `commands/` stays asserted absent, and for a reason that has not changed: a Codex
+        manifest has no `commands` field and `validate_plugin.py` rejects one.
+        """
         self.assertFalse((PLUGIN / ".app.json").exists())
         self.assertFalse((PLUGIN / "commands").exists())
 
@@ -576,6 +628,142 @@ class Hygiene(unittest.TestCase):
         env = os.environ.get("GITHUB_REPOSITORY")
         if env:
             self.assertEqual(env, REPO_NAME)
+
+class Hooks(unittest.TestCase):
+    """The tree Codex runs on every prompt, vendored byte for byte with ZERO transforms.
+
+    Stricter than `skill.lock`, which sanctions exactly one line. Two comparisons because
+    they catch different failures: against the sha the lock names, and against the
+    library's current default branch. The first alone is satisfied forever by a lock and a
+    copy frozen together, which is how the vendored skill in this family once shipped five
+    commits behind for four days with every test green.
+    """
+
+    def _ours(self) -> "set[str]":
+        return {path.relative_to(HOOKS).as_posix() for path in HOOKS.rglob("*")
+                if path.is_file() and "__pycache__" not in path.parts}
+
+    def _vendored(self) -> "set[str]":
+        # `hooks.json` is generated from the host record, not vendored: seven repositories
+        # share this tree and each registers a different client, so a canonical copy would
+        # be one repository's manifest shipped to all of them.
+        return self._ours() - {GENERATED_REGISTRATION}
+
+    def test_the_vendored_hook_bytes_match_the_library_at_the_pinned_sha(self) -> None:
+        lock = _lock("hooks.lock")
+        self.assertEqual(lock["repo"], "memvara/memvara")
+        self.assertEqual(lock["path"], LIBRARY_HOOKS_PATH)
+        self.assertEqual(lock["host"], "codex")
+        sha = lock["sha"]
+        self.assertEqual(len(sha), 40, f"hooks.lock sha is not a full sha: {sha!r}")
+        ours = self._vendored()
+        self.assertTrue(ours, "no vendored hook files found — this guard would pass on "
+                              "an empty tree, which is the shape it exists to stop")
+        try:
+            upstream = _library_files(sha, LIBRARY_HOOKS_PATH)
+        except LibraryUnreachable as exc:
+            raise unittest.SkipTest(
+                f"library unreachable, vendored bytes NOT checked: {exc}") from exc
+        self.assertEqual(ours, upstream,
+                         f"the vendored hook file set differs from the library@{sha[:7]}")
+        drifted = [rel for rel in sorted(ours)
+                   if (HOOKS / rel).read_bytes()
+                   != _library_bytes(sha, f"{LIBRARY_HOOKS_PATH}/{rel}")]
+        self.assertEqual(drifted, [], f"vendored hooks drifted from {sha[:7]}: {drifted}")
+
+    def test_the_vendored_hooks_are_not_behind_the_library(self) -> None:
+        """Skips loudly rather than passing when the library cannot be reached: a check
+        that passes because it could not look is the failure one level up."""
+        try:
+            head = _library_head()
+            upstream = _library_files(head, LIBRARY_HOOKS_PATH)
+        except LibraryUnreachable as exc:
+            raise unittest.SkipTest(
+                f"library unreachable, hook drift NOT checked: {exc}") from exc
+        self.assertTrue(upstream, "the library reported an empty hook tree")
+        self.assertEqual(self._vendored(), upstream,
+                         f"the vendored hook file set differs from the library at "
+                         f"{head[:7]} — re-vendor and update hooks.lock")
+
+    def test_the_hook_file_set_is_named_here_one_by_one(self) -> None:
+        extra = self._ours() - ALLOWED_HOOK_FILES
+        self.assertFalse(extra, f"unlisted hook files: {sorted(extra)} — add them to "
+                                "ALLOWED_HOOK_FILES deliberately, having read them")
+
+    def test_the_allowlist_names_nothing_that_is_no_longer_in_the_tree(self) -> None:
+        """A file deleted upstream leaves its entry behind, the entry covers nothing, and
+        a list that has stopped covering a file looks exactly like one that covers
+        everything."""
+        missing = ALLOWED_HOOK_FILES - self._ours()
+        self.assertFalse(missing, f"allowlist names files that are gone: {sorted(missing)}")
+
+    def test_the_registration_is_what_the_record_generates(self) -> None:
+        """`hooks.json` is the one file here that is built rather than copied.
+
+        Built IN PROCESS and compared to the committed bytes. The first version of this
+        guard ran `generate.py` as a subprocess, which REWRITES hooks.json, and then
+        diffed the file against git -- so the regeneration erased the edit before the
+        comparison and a hand-edited manifest passed. It could not fail, which a sabotage
+        found and reading could not.
+        """
+        sys.path.insert(0, str(HOOKS))
+        try:
+            from tools.generate import registration  # noqa: PLC0415
+            import hosts.codex as record  # noqa: PLC0415
+        finally:
+            sys.path.remove(str(HOOKS))
+        self.assertEqual(
+            (HOOKS / "hooks.json").read_bytes(), registration(record.HOST),
+            "the committed hooks.json is not what hosts/codex.py generates — it was "
+            "hand-edited, or the record changed without regenerating")
+
+    def test_capture_is_not_registered_async_on_this_client(self) -> None:
+        """The measurement that decides whether capture runs at all.
+
+        Codex accepts `async: true` and then does not run the hook -- an async Stop wrote
+        no receipt though writing one is the script's first statement. Declared
+        synchronous it fires, and `run.py` forks it so the turn is not held. An `async`
+        key reappearing here would silently disable capture on every install.
+        """
+        body = _json(HOOKS / "hooks.json")
+        stop = body["hooks"]["Stop"][0]["hooks"][0]
+        self.assertNotIn("async", stop,
+                         "Stop is registered async, and an async hook does not run on "
+                         "this client — capture would be silently dead")
+
+    def test_the_context_limit_is_declared_where_context_can_be_carried(self) -> None:
+        """Codex truncates `additionalContext` middle-out above a default measured between
+        8KB intact and 12KB cut, which would eat the middle of the standing block. The
+        client's own limit raises it. It is declared only on hooks that can carry context,
+        because Codex warns about the key on the ones that cannot."""
+        body = _json(HOOKS / "hooks.json")["hooks"]
+        for event in ("SessionStart", "UserPromptSubmit"):
+            entry = body[event][0]["hooks"][0]
+            self.assertGreaterEqual(
+                entry.get("additionalContextLimit", 0), 16000,
+                f"{event} declares no limit large enough for the standing block, so the "
+                "client will truncate its middle and say so only in a warning")
+        self.assertNotIn("additionalContextLimit", body["Stop"][0]["hooks"][0],
+                         "Stop cannot emit additionalContext on this client, so the key "
+                         "is ignored — and a key nobody reads goes stale unnoticed")
+
+    def test_this_repository_ships_the_record_its_lock_binds(self) -> None:
+        self.assertEqual(_lock("hooks.lock")["host"], "codex")
+        self.assertTrue((HOOKS / "hosts" / "codex.py").is_file())
+
+    def test_a_hook_never_fails_a_turn_whatever_the_environment(self) -> None:
+        """No home directory, no store, no credentials: exit 0 and stay quiet."""
+        env = dict(os.environ, HOME="/nonexistent", MEMVARA_HOME="/nonexistent")
+        for hook in ("session_start", "recall", "capture", "approve"):
+            with self.subTest(hook=hook):
+                proc = subprocess.run(
+                    [sys.executable, str(HOOKS / "run.py"), hook, "--host", "codex"],
+                    input="{}", capture_output=True, text=True, env=env, timeout=120)
+                self.assertEqual(proc.returncode, 0,
+                                 f"{hook} exited {proc.returncode}: {proc.stderr[:300]}")
+                if proc.stdout.strip():
+                    json.loads(proc.stdout)
+
 
 class CodexManifest(unittest.TestCase):
     def test_codex_plugin_json(self) -> None:
@@ -624,7 +812,13 @@ class CodexManifest(unittest.TestCase):
         for path in SKILL.rglob("*"):
             if path.is_file():
                 allowed.add(path.relative_to(PLUGIN))
-        found = {p.relative_to(PLUGIN) for p in PLUGIN.rglob("*") if p.is_file()}
+        # The hook tree is admitted here by NAME, from the same allowlist `Hooks` checks
+        # in both directions -- not by a `hooks/**` wildcard, which would let a second
+        # module or a stray script ship from this plugin without anything going red.
+        for rel in ALLOWED_HOOK_FILES:
+            allowed.add(pathlib.Path("hooks") / rel)
+        found = {p.relative_to(PLUGIN) for p in PLUGIN.rglob("*")
+                 if p.is_file() and "__pycache__" not in p.parts}
         self.assertFalse(found - allowed, found - allowed)
 
 
@@ -883,9 +1077,22 @@ class AuthScript(unittest.TestCase):
         self.assertNotIn("no local Python process", text,
                          "the README still claims no Python ships, and a Python script "
                          "is sitting in plugin/skills/memvara/scripts/")
-        self.assertIn("Nothing runs in the background", text,
-                      "the README should still tell the reader nothing is left running, "
-                      "which is the true half of what that sentence used to claim")
+        # This used to REQUIRE "Nothing runs in the background", which was the true half
+        # of the old sentence while the only Python here was a command the user typed. It
+        # is false now: the plugin runs python3 on every prompt and again when a turn
+        # ends, without being asked. Requiring the positive disclosure instead means a
+        # README that quietly stops mentioning the background work fails exactly as
+        # loudly as one that denies it.
+        self.assertNotIn("Nothing runs in the background", text)
+        self.assertIn("What runs on your machine", text,
+                      "the README has no section saying what this plugin runs locally")
+        self.assertIn("~/.memvara/.hooks/", text,
+                      "the README does not name where the hooks account for themselves, "
+                      "and on this host that log is the only account there is")
+        self.assertIn("trust", text.lower(),
+                      "the README does not mention the trust gate, and an untrusted hook "
+                      "on this client is silently skipped rather than refused — a user "
+                      "who never trusts them sees nothing and is told nothing")
 
 
 if __name__ == "__main__":

@@ -9,16 +9,25 @@
   "homepage": "https://memvara.dev/docs/agents",
   "repository": "https://github.com/memvara/codex-memvara",
   "license": "Apache-2.0",
-  "keywords": ["memory", "mcp", "agents", "codex", "chatgpt"],
+  "keywords": [
+    "memory",
+    "mcp",
+    "agents",
+    "codex",
+    "chatgpt"
+  ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Memvara",
     "shortDescription": "Hosted memory for Codex and ChatGPT",
-    "longDescription": "Fourteen memory tools on a hosted store, plus the skill for using them without forging history. OAuth in the browser. No local process.",
+    "longDescription": "Fourteen memory tools on a hosted store, plus the skill for using them without forging history, and hooks that recall on every prompt and capture when a turn ends. OAuth in the browser. Runs python3 locally; hooks must be trusted first.",
     "developerName": "Memvara",
     "category": "Productivity",
-    "capabilities": ["Read", "Write"],
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
     "websiteURL": "https://memvara.dev",
     "privacyPolicyURL": "https://memvara.dev/privacy",
     "termsOfServiceURL": "https://memvara.dev/terms",
@@ -27,5 +36,6 @@
       "Remember that we use Postgres in production.",
       "Why did you say I lived in Berlin?"
     ]
-  }
+  },
+  "hooks": "./hooks/hooks.json"
 }
