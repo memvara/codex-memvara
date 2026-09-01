@@ -169,7 +169,13 @@ ALLOWED_HOOK_FILES = {
     "hooks.json",
     "run.py", "recall.py", "capture.py", "session_start.py", "approve.py", "daemon.py",
     "core/__init__.py", "core/host.py", "core/envelope.py",
+    # `hosts/claude.py`, `hosts/opencode.py` and `hosts/cursor.py` are other
+    # clients' records: inert here, since `run.py --host codex` imports only the
+    # record it is given. Present because the tree is copied whole with zero
+    # transforms, and named rather than wildcarded so a file nobody read cannot
+    # ship from this plugin.
     "hosts/__init__.py", "hosts/claude.py", "hosts/codex.py", "hosts/opencode.py",
+    "hosts/cursor.py",
     "js/shim.mjs", "js/opencode.mjs",
     "lib/__init__.py", "lib/extract.py", "lib/fast.py", "lib/hosted.py", "lib/ipc.py",
     "lib/open.py", "lib/standing.py", "lib/transcript.py", "lib/usage.py", "lib/write.py",
