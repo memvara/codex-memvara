@@ -37,9 +37,15 @@ itself is `~/.memvara/.hooks/` — `hooks.log` for the read path and
 `capture.log` for the write path, where every run writes a line including
 the runs that decide to do nothing.
 
-Capture shells out to `claude -p` to mine a turn. Without Claude Code
-installed, extraction logs that it could not run and raises an alert on the
-next prompt rather than storing nothing in silence.
+Capture mines the turn with **your own model** — it runs `codex exec` with
+whatever you have configured and authenticated, so nothing else needs
+installing and nothing overrides the model you chose. `claude -p` stays as a
+fallback if you happen to have Claude Code; with neither, extraction logs that
+it could not run and raises an alert on the next prompt rather than storing
+nothing in silence.
+
+That makes capture's speed and quality yours too, and `capture.log` is where
+that shows.
 
 ## When the browser sign-in will not finish
 

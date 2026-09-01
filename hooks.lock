@@ -3,6 +3,6 @@
 # unlike skill.lock, which allows exactly one line. hooks.json is the one exception: it is
 # GENERATED from the record host= names, and has its own guard.
 repo=memvara/memvara
-sha=33a60ef1cf717dea734a4623b7e259b8ce5c9998
+sha=2e0f49a9843e1d4077b34f3e5b1a8406d11e8103
 path=plugin/hooks
 host=codex
