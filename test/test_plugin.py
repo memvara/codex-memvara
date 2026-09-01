@@ -753,7 +753,19 @@ class Hooks(unittest.TestCase):
 
     def test_a_hook_never_fails_a_turn_whatever_the_environment(self) -> None:
         """No home directory, no store, no credentials: exit 0 and stay quiet."""
-        env = dict(os.environ, HOME="/nonexistent", MEMVARA_HOME="/nonexistent")
+        env = dict(os.environ, HOME="/nonexistent", MEMVARA_HOME="/nonexistent",
+                   # WITHOUT this, `capture` on this host forks and returns before the
+                   # body is even imported -- `detach_capture=True` -- so the subtest
+                   # checked the exit code of the forking wrapper while the code that
+                   # opens a store, reads a transcript and writes claims ran unobserved
+                   # in a detached child whose stdout goes to /dev/null.
+                   #
+                   # Demonstrated: with `capture` sabotaged to print bytes that are not
+                   # JSON, this test FAILS with the sentinel set and PASSES without it.
+                   # The exit-code half of the assertion cannot tell the difference --
+                   # `run.py` returns 0 on every path by design -- so the stdout half is
+                   # the whole of what this guard adds, and the fork removed it.
+                   MEMVARA_HOOK_DETACHED="1")
         for hook in ("session_start", "recall", "capture", "approve"):
             with self.subTest(hook=hook):
                 proc = subprocess.run(
