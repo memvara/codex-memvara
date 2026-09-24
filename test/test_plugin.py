@@ -179,6 +179,20 @@ ALLOWED_HOOK_FILES = {
     "js/shim.mjs", "js/opencode.mjs",
     "lib/__init__.py", "lib/extract.py", "lib/fast.py", "lib/hosted.py", "lib/ipc.py",
     "lib/open.py", "lib/standing.py", "lib/transcript.py", "lib/usage.py", "lib/write.py",
+    # Added with the 0.15.0 sync, and read before being listed. `lib/project.py` works
+    # out the git project the hooks send to the server, and `lib/project_vectors.json` is
+    # data, not code: the remote URLs and the project each must resolve to, which the
+    # library's own copy is tested against too. `lib/counts.py` keeps per-session counts
+    # for a status line, `lib/mark.py` starts every injected memory line with a mark so
+    # capture never stores it again, `lib/settings.py` reads the on/off switches in
+    # `~/.memvara/settings.json`, and `lib/state_file.py` does the locked, atomic writes
+    # those files need. `lib/read_model.py` lets the recall hook rewrite a query only
+    # after a model key check is on record. `lib/agentic.py` is agentic capture, which
+    # runs only when the first extractor is `claude`; with `--host codex` this client's
+    # own CLI comes first, so it stays inert here.
+    "lib/agentic.py", "lib/counts.py", "lib/mark.py", "lib/project.py",
+    "lib/project_vectors.json", "lib/read_model.py", "lib/settings.py",
+    "lib/state_file.py",
     "tools/__init__.py", "tools/generate.py",
 }
 
@@ -274,8 +288,11 @@ class License(unittest.TestCase):
 #: nothing.
 HOSTED_TOOLS = (
     "memory_recall", "memory_search", "memory_neighborhood", "memory_paths",
-    "memory_ask", "memory_since", "memory_standing", "memory_add", "memory_remember",
-    "memory_forget", "memory_end", "memory_history", "memory_why", "memory_stats",
+    "memory_ask", "memory_since", "memory_standing", "memory_profile", "memory_add",
+    "memory_remember", "memory_forget", "memory_end", "memory_end_matching",
+    "memory_forget_matching", "memory_link", "memory_history", "memory_why",
+    "memory_stats", "memory_add_document", "memory_get_document",
+    "memory_list_documents", "memory_delete_document",
 )
 HOSTED_TOOL_COUNT = len(HOSTED_TOOLS)
 
@@ -285,6 +302,8 @@ HOSTED_TOOL_COUNT = len(HOSTED_TOOLS)
 NUMBER_WORDS = (
     "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
     "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+    "seventeen", "eighteen", "nineteen", "twenty", "twenty-one", "twenty-two",
+    "twenty-three", "twenty-four",
 )
 
 
@@ -511,8 +530,11 @@ class ToolCount(unittest.TestCase):
         # "ten MEMORY tools" -- and a pattern without it does not match, which is the
         # second half of why that sentence rotted unnoticed. Widening the file set alone
         # left this sabotage passing: the file was scanned and the regex still missed it.
+        # `(?<!-)` because a compound count such as "twenty-two tools" contains "two tools"
+        # after its hyphen, and `\b` matches there. A wrong compound is still caught: each
+        # compound is an alternative of its own, matched from its first letter.
         pattern = re.compile(
-            r"\b(" + "|".join(w for w in NUMBER_WORDS if w != word)
+            r"(?<!-)\b(" + "|".join(w for w in NUMBER_WORDS if w != word)
             + r")\s+(?:memory\s+)?tools\b",
             re.IGNORECASE)
         # `*.json` as well as `*.md`, and asked of git rather than the filesystem.
