@@ -984,7 +984,7 @@ class Version(unittest.TestCase):
     stopped guarding.
     """
 
-    VERSION = "0.2.5"
+    VERSION = "0.3.0"
     DECLARED = {
         'plugin/.codex-plugin/plugin.json',
     }
